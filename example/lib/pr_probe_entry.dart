@@ -15,6 +15,11 @@
 //     --dart-define=PROBE=pr72 --dart-define=SCENARIO=collapse --dart-define=LABEL=before
 //   (SCENARIO: resize | collapse | zero | offscreen | detach; the page auto-toggles.)
 //
+//   flutter run -t lib/pr_probe_entry.dart \
+//     --dart-define=PROBE=alert --dart-define=SCENARIO=textfield
+//   (SCENARIO: twobutton | destructive | threebutton | titleonly | disabled |
+//    textfield | secure | twofields; the alert opens itself on the first frame.)
+//
 // PROBE=pr67report additionally dumps the MAE/cost table to the run log.
 
 import 'package:flutter/cupertino.dart';
@@ -24,6 +29,7 @@ import 'demos/pr66_glass_image_asset_tint_test.dart';
 import 'demos/pr67_icon_supersample_test.dart';
 import 'demos/pr69_glass_effect_test.dart';
 import 'demos/pr72_glass_resize_test.dart';
+import 'demos/alert.dart';
 
 const String _probe = String.fromEnvironment('PROBE', defaultValue: 'pr67');
 const String _backdrop = String.fromEnvironment(
@@ -97,6 +103,9 @@ class _ProbeApp extends StatelessWidget {
         label: _label,
         autoCycle: true,
       );
+    }
+    if (_probe == 'alert') {
+      return AlertDemoPage(autoScenario: _scenario);
     }
     return Pr67IconSupersampleTestPage(
       initialIcon: _icon,
