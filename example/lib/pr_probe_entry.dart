@@ -15,11 +15,17 @@
 //     --dart-define=PROBE=pr72 --dart-define=SCENARIO=collapse --dart-define=LABEL=before
 //   (SCENARIO: resize | collapse | zero | offscreen | detach; the page auto-toggles.)
 //
+//   flutter run -t lib/pr_probe_entry.dart \
+//     --dart-define=PROBE=actionsheet --dart-define=SCENARIO=destructive
+//   (SCENARIO: destructive | nocancel | titleonly | disabled | longlist |
+//    anchored; the sheet opens itself on the first frame.)
+//
 // PROBE=pr67report additionally dumps the MAE/cost table to the run log.
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show DefaultMaterialLocalizations;
 
+import 'demos/action_sheet.dart';
 import 'demos/pr66_glass_image_asset_tint_test.dart';
 import 'demos/pr67_icon_supersample_test.dart';
 import 'demos/pr69_glass_effect_test.dart';
@@ -90,6 +96,9 @@ class _ProbeApp extends StatelessWidget {
         initialBackdrop: _backdrop == 'photo' ? 'photo' : 'stripes',
         initialTinted: _accent == 'pink',
       );
+    }
+    if (_probe == 'actionsheet') {
+      return ActionSheetDemoPage(autoScenario: _scenario);
     }
     if (_probe.startsWith('pr72')) {
       return Pr72GlassResizeTestPage(
