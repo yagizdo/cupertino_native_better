@@ -56,6 +56,9 @@ public class CupertinoNativePlugin: NSObject, FlutterPlugin {
     // Factory is available on all iOS, runtime check happens inside
     let searchScaffoldFactory = CNSearchScaffoldViewFactory(messenger: registrar.messenger())
     registrar.register(searchScaffoldFactory, withId: "CNSearchScaffold")
+
+    // Setup the alert presenter (UIAlertController, no platform view)
+    CNAlertManager.shared.setup(messenger: registrar.messenger())
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
