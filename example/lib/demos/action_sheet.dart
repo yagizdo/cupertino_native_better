@@ -57,6 +57,10 @@ class _ActionSheetDemoPageState extends State<ActionSheetDemoPage> {
   }
 
   void _record(String? value) {
+    // Every caller awaits `CNActionSheet.show` first, and a superseded sheet
+    // resolves its caller as soon as the next one is requested, so the page can
+    // be gone by the time the result lands.
+    if (!mounted) return;
     setState(() => _lastResult = value ?? '(cancelled)');
   }
 

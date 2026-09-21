@@ -727,9 +727,18 @@ to know about that path:
 - On iOS 26 a centred sheet groups the cancel button with the actions (side by
   side when there is only one action), rather than the detached bottom row
   older iOS used.
-- An **anchored** sheet drops the cancel button entirely; tapping outside
-  dismisses it. Passing `cancelLabel` alongside `anchorRect` is harmless, it
-  simply does not render.
+- Below iOS 26 UIKit adds no cancel button of its own, so the sheet shows
+  exactly the actions you passed. Without a `cancelLabel` the only way out is to
+  pick one, so pass one unless forcing a choice is what you want.
+
+What `anchorRect` itself does depends on the presentation the OS picks:
+
+- On iPad, and on iPhone from iOS 26, the sheet is a popover: it drops the
+  cancel button and is dismissed by tapping outside, so passing `cancelLabel`
+  alongside `anchorRect` is harmless — it simply does not render.
+- On iPhone below iOS 26 `anchorRect` does not turn the sheet into a popover.
+  It still slides up from the bottom, still renders `cancelLabel` and still has
+  no outside-tap dismissal, so pass one.
 
 #### Content guidance
 

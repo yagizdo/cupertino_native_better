@@ -167,6 +167,27 @@ void main() {
       expect((args?['actions']! as List<Object?>).length, 1);
       expect(args?['anchorRect'], isA<Map<Object?, Object?>>());
     });
+
+    testWidgets('refuses a sheet with no action and no cancel', (tester) async {
+      final calls = <MethodCall>[];
+      mockChannel((call) async {
+        calls.add(call);
+        return null;
+      });
+
+      await _withPlatform(TargetPlatform.iOS, () async {
+        final context = await _pumpContext(tester);
+
+        // Such a sheet has no button, so none of the native paths back to Dart
+        // can run and the call would never complete. It is refused before it
+        // reaches the channel.
+        expect(
+          () => CNActionSheet.show<String>(context: context, actions: const []),
+          throwsAssertionError,
+        );
+        expect(calls, isEmpty);
+      });
+    });
   });
 
   group('CNActionSheet.show on non-iOS', () {
@@ -195,6 +216,81 @@ void main() {
 
         expect(calls, isEmpty);
         expect(find.text('First'), findsOneWidget);
+      });
+    });
+
+    testWidgets('fallback resolves to the tapped action', (tester) async {
+      mockChannel((call) async => null);
+
+      await _withPlatform(TargetPlatform.android, () async {
+        final context = await _pumpContext(tester);
+        final future = CNActionSheet.show<String>(
+          context: context,
+          cancelLabel: 'Cancel',
+          actions: const [
+            CNActionSheetAction<String>(label: 'First', value: 'first'),
+            CNActionSheetAction<String>(label: 'Second', value: 'second'),
+          ],
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Second'));
+        await tester.pumpAndSettle();
+
+        expect(await future, 'second');
+      });
+    });
+
+    testWidgets('fallback ignores a disabled action', (tester) async {
+      mockChannel((call) async => null);
+
+      await _withPlatform(TargetPlatform.android, () async {
+        final context = await _pumpContext(tester);
+        final future = CNActionSheet.show<String>(
+          context: context,
+          cancelLabel: 'Cancel',
+          actions: const [
+            CNActionSheetAction<String>(label: 'On', value: 'on'),
+            CNActionSheetAction<String>(
+              label: 'Off',
+              value: 'off',
+              enabled: false,
+            ),
+          ],
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Off'));
+        await tester.pumpAndSettle();
+
+        // Still up: a disabled row must not resolve the call.
+        expect(find.text('On'), findsOneWidget);
+
+        await tester.tap(find.text('On'));
+        await tester.pumpAndSettle();
+
+        expect(await future, 'on');
+      });
+    });
+
+    testWidgets('fallback cancel resolves to null', (tester) async {
+      mockChannel((call) async => null);
+
+      await _withPlatform(TargetPlatform.android, () async {
+        final context = await _pumpContext(tester);
+        final future = CNActionSheet.show<String>(
+          context: context,
+          cancelLabel: 'Cancel',
+          actions: const [
+            CNActionSheetAction<String>(label: 'First', value: 'first'),
+          ],
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        expect(await future, isNull);
       });
     });
   });

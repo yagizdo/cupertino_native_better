@@ -29,6 +29,12 @@ final class CNActionSheetManager: NSObject {
     /// a double send as a hard error.
     private var pendingResult: FlutterResult?
 
+    /// The sheet `pendingResult` belongs to, and the identity every send is
+    /// checked against. A superseded sheet is torn down rather than left on
+    /// screen, but its handlers can still fire during that teardown — without
+    /// an identity they would answer the next caller's call.
+    private weak var presentedAlert: UIAlertController?
+
     func setup(messenger: FlutterBinaryMessenger) {
         let ch = FlutterMethodChannel(name: "cn_action_sheet", binaryMessenger: messenger)
         channel = ch
@@ -54,16 +60,35 @@ final class CNActionSheetManager: NSObject {
     // MARK: - Presentation
 
     private func show(config: Config, result: @escaping FlutterResult) {
-        guard let presenter = topPresenter() else {
+        // Resolve the window once. The presenter walk and the anchor's source
+        // view have to agree on it: `keyWindow()` picks an arbitrary scene when
+        // more than one is foreground-active, which is the normal state for two
+        // of the app's windows side by side on iPadOS.
+        let window = keyWindow()
+
+        // Resolve the presenter *before* dismissing the sheet below.
+        // `dismiss(animated:)` does not clear `presentedViewController`
+        // synchronously, so a walk performed afterwards can still land on the
+        // alert being torn down and present the new sheet from it.
+        let presenter = topPresenter(in: window, skipping: presentedAlert)
+
+        // A sheet already on screen means the previous caller is still waiting.
+        // Take that sheet down first, so its actions can no longer fire, then
+        // answer the call it belonged to.
+        if let stale = presentedAlert {
+            stale.presentationController?.delegate = nil
+            stale.dismiss(animated: false)
+            presentedAlert = nil
+        }
+        send(nil)
+
+        guard let presenter else {
             result(FlutterError(code: "no_presenter",
                                 message: "No view controller available to present on",
                                 details: nil))
             return
         }
 
-        // A sheet already on screen means the previous caller is still waiting.
-        // Answer it with nil before taking ownership of `pendingResult`.
-        send(nil)
         pendingResult = result
 
         let alert = UIAlertController(title: config.title,
@@ -74,25 +99,26 @@ final class CNActionSheetManager: NSObject {
             let action = UIAlertAction(
                 title: entry.label,
                 style: entry.destructive ? .destructive : .default
-            ) { [weak self] _ in
-                self?.send(index)
+            ) { [weak self, weak alert] _ in
+                self?.send(index, from: alert)
             }
             action.isEnabled = entry.enabled
             alert.addAction(action)
         }
 
         if let cancelLabel = config.cancelLabel {
-            alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { [weak self] _ in
-                self?.send(nil)
+            alert.addAction(UIAlertAction(title: cancelLabel, style: .cancel) { [weak self, weak alert] _ in
+                self?.send(nil, from: alert)
             })
         }
 
-        applyAnchor(config.anchorRect, to: alert, presenter: presenter)
+        applyAnchor(config.anchorRect, to: alert, in: window, presenter: presenter)
 
         // Catches a dismissal that fires no action handler — tapping outside an
         // anchored popover, or a swipe-down.
         alert.presentationController?.delegate = self
 
+        presentedAlert = alert
         presenter.present(alert, animated: true)
     }
 
@@ -104,19 +130,23 @@ final class CNActionSheetManager: NSObject {
     /// the new transitions, so `anchorRect` matters on every device — it is not
     /// an iPad-only escape hatch.
     ///
-    /// Omitting the source is supported: the system centres the sheet and adds
-    /// a cancel button. The one case that needs a synthetic source is a
-    /// regular-width layout before iOS 26, where UIKit raises
-    /// `NSInternalInconsistencyException` without one.
+    /// Omitting the source is supported: the system centres the sheet, and
+    /// from iOS 26 gives it a cancel button of its own. Earlier iOS adds
+    /// nothing, so a centred sheet there shows exactly the actions Dart passed.
+    /// The one case that needs a synthetic source is a regular-width layout
+    /// before iOS 26, where UIKit raises `NSInternalInconsistencyException`
+    /// without one.
     private func applyAnchor(_ anchorRect: CGRect?,
                              to alert: UIAlertController,
+                             in window: UIWindow?,
                              presenter: UIViewController) {
         guard let popover = alert.popoverPresentationController else { return }
 
         // The rect arrives in Flutter's logical pixels, which are UIKit points,
         // measured against the Flutter view. Anchor to that view when it can be
-        // found so the coordinates line up.
-        let sourceView = findFlutterVC(keyWindow()?.rootViewController)?.view ?? presenter.view
+        // found so the coordinates line up. `window` is the one the presenter
+        // was resolved from, so the source view cannot land in a different one.
+        let sourceView = findFlutterVC(window?.rootViewController)?.view ?? presenter.view
 
         if let rect = anchorRect, let sourceView {
             popover.sourceView = sourceView
@@ -134,17 +164,32 @@ final class CNActionSheetManager: NSObject {
         // bottom.
     }
 
-    /// Delivers `value` to the waiting Dart call exactly once.
+    /// Delivers `value` to the waiting Dart call exactly once, whichever sheet
+    /// it came from. Only for sends that belong to no sheet: superseding a
+    /// pending call when a new `show` arrives.
     private func send(_ value: Int?) {
         guard let result = pendingResult else { return }
         pendingResult = nil
+        presentedAlert = nil
         result(value)
+    }
+
+    /// Delivers `value` only while `alert` is still the sheet the pending call
+    /// belongs to. A handler from a superseded sheet, or from one whose alert
+    /// has already been released, is dropped rather than answering a call that
+    /// is not its own.
+    private func send(_ value: Int?, from alert: UIAlertController?) {
+        guard let alert, alert === presentedAlert else { return }
+        send(value)
     }
 
     // MARK: - View controller lookup
 
-    // Duplicated from `CNNativeTabBarManager`, where both helpers are private.
-    // Ten lines of copy beats changing a shipped file to share them.
+    // `keyWindow` and `findFlutterVC` are duplicated from
+    // `CNNativeTabBarManager`, where both are private. Ten lines of copy beats
+    // changing a shipped file to share them. `topPresenter` started as a copy
+    // too and no longer is: it takes the window it should walk, and the sheet
+    // it must not walk into.
 
     private func keyWindow() -> UIWindow? {
         let scenes = UIApplication.shared.connectedScenes
@@ -153,9 +198,15 @@ final class CNActionSheetManager: NSObject {
         return windowScene?.windows.first(where: { $0.isKeyWindow }) ?? windowScene?.windows.first
     }
 
-    private func topPresenter() -> UIViewController? {
-        guard var vc = keyWindow()?.rootViewController else { return nil }
-        while let presented = vc.presentedViewController { vc = presented }
+    /// Walks to the top of `window`'s presentation chain, stopping before
+    /// `stale` so a sheet being replaced is never used to present its
+    /// replacement.
+    private func topPresenter(in window: UIWindow?,
+                              skipping stale: UIAlertController?) -> UIViewController? {
+        guard var vc = window?.rootViewController else { return nil }
+        while let presented = vc.presentedViewController, presented !== stale {
+            vc = presented
+        }
         return vc
     }
 
@@ -213,6 +264,6 @@ final class CNActionSheetManager: NSObject {
 
 extension CNActionSheetManager: UIAdaptivePresentationControllerDelegate {
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        send(nil)
+        send(nil, from: presentationController.presentedViewController as? UIAlertController)
     }
 }

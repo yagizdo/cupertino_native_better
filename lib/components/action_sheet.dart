@@ -98,7 +98,9 @@ class CNActionSheetAction<T> {
 /// iPhone as well as iPad, appearing directly over that view. Pass
 /// [anchorRect] — the global rect of the widget that triggered the sheet — to
 /// get that presentation and its transition. Omitting it is still valid: the
-/// system centres the sheet and shows a cancel button.
+/// system centres the sheet, and from iOS 26 gives it a cancel button. Below
+/// iOS 26 the centred sheet shows only the actions you passed, so supply a
+/// `cancelLabel` there.
 ///
 /// ```dart
 /// final box = _buttonKey.currentContext!.findRenderObject()! as RenderBox;
@@ -120,8 +122,14 @@ class CNActionSheet {
   /// outside, or when the selected action carries no value.
   ///
   /// [title] and [message] are the sheet's header. [cancelLabel] adds a
-  /// cancel-styled button; pass null to omit it — though on iOS the system adds
-  /// its own cancel button when no [anchorRect] is given.
+  /// cancel-styled button. From iOS 26 the system supplies one of its own for a
+  /// centred sheet, so passing null is safe there; below iOS 26 UIKit adds
+  /// nothing, and a sheet with no cancel row can only be left by picking one of
+  /// its actions. Pass a [cancelLabel] unless forcing a choice is the point.
+  ///
+  /// A call with no actions *and* no [cancelLabel] would present a sheet with
+  /// nothing to press and never resolve, so it asserts in debug and resolves to
+  /// null without presenting anything in release.
   ///
   /// Apple's Human Interface Guidelines recommend at most four buttons
   /// including cancel. Longer lists work, but scroll.
@@ -133,6 +141,18 @@ class CNActionSheet {
     String? cancelLabel,
     Rect? anchorRect,
   }) {
+    assert(
+      actions.isNotEmpty || cancelLabel != null,
+      'CNActionSheet.show needs at least one action or a cancelLabel: a sheet '
+      'with neither has nothing to press and never resolves.',
+    );
+    // `actions` is often built from a collection that can come out empty. With
+    // no cancel button either, the native sheet has no button and no dismissal
+    // path, so none of the three paths that complete the call can run and the
+    // caller's await hangs for the life of the process. Answer it here instead
+    // of presenting a modal there is no way out of.
+    if (actions.isEmpty && cancelLabel == null) return Future<T?>.value(null);
+
     if (defaultTargetPlatform != TargetPlatform.iOS) {
       return _showFallback<T>(
         context: context,
