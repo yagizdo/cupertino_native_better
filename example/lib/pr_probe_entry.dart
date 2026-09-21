@@ -18,7 +18,8 @@
 //   flutter run -t lib/pr_probe_entry.dart \
 //     --dart-define=PROBE=alert --dart-define=SCENARIO=textfield
 //   (SCENARIO: twobutton | destructive | threebutton | titleonly | disabled |
-//    textfield | secure | twofields; the alert opens itself on the first frame.)
+//    textfield | secure | twofields | supersede; the alert opens itself on the
+//    first frame.)
 //
 // PROBE=pr67report additionally dumps the MAE/cost table to the run log.
 

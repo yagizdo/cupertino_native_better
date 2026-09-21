@@ -198,8 +198,11 @@ class CNAlert {
   /// Presents the alert and resolves to what the user answered.
   ///
   /// Resolves to null when no answer was produced: the plugin is not
-  /// registered, the native presentation failed, or the fallback route was
-  /// popped without a button press. A pressed button — including a cancel
+  /// registered, the native presentation failed, the fallback route was popped
+  /// without a button press, or — on iOS only — a second [CNAlert.show]
+  /// superseded this one, taking its alert down and resolving this call to
+  /// null. The Flutter fallback stacks instead: the earlier dialog stays up and
+  /// resolves on its own button press. A pressed button — including a cancel
   /// button — always resolves to a [CNAlertResult].
   ///
   /// [title] and [message] are the alert's header. [textFields] adds one input
@@ -210,9 +213,10 @@ class CNAlert {
   /// alert; more work, but stack vertically.
   ///
   /// Asserts in debug, and returns null without presenting anything in release,
-  /// when [actions] is empty — a `.alert` cannot be dismissed by tapping
-  /// outside, so an alert with no buttons can never be dismissed and the
-  /// returned future would never complete.
+  /// when [actions] is empty or every action is disabled — a `.alert` cannot be
+  /// dismissed by tapping outside, so every way out of it runs an action
+  /// handler. An alert with no button, or none that accepts a tap, can never be
+  /// dismissed and the returned future would never complete.
   ///
   /// Also asserts against configurations UIKit cannot render: two actions with
   /// [CNAlertAction.isCancel] (a hard `NSInternalInconsistencyException`), two
@@ -231,6 +235,12 @@ class CNAlert {
       'tapping outside, so one with no buttons never resolves.',
     );
     assert(
+      actions.any((a) => a.enabled),
+      'CNAlert.show needs at least one enabled action: an alert cannot be '
+      'dismissed by tapping outside, so one whose buttons all refuse taps '
+      'never resolves.',
+    );
+    assert(
       actions.where((a) => a.isCancel).length <= 1,
       'CNAlert.show accepts at most one action with isCancel: UIKit raises '
       'NSInternalInconsistencyException on a second .cancel action.',
@@ -246,12 +256,15 @@ class CNAlert {
       'UIAlertAction.Style is one value, so one of the two would be dropped.',
     );
 
-    // `actions` is often built from a collection that can come out empty. The
-    // native alert would then have no button and no dismissal path, so nothing
-    // could complete the call and the caller's await would hang for the life of
-    // the process. Answer it here instead of presenting a modal there is no way
-    // out of.
-    if (actions.isEmpty) return Future<CNAlertResult<T>?>.value(null);
+    // `actions` is often built from a collection that can come out empty, and
+    // `enabled` is often computed per action from one flag that can be false for
+    // all of them. The native alert would then have no button that answers a
+    // tap and no dismissal path, so nothing could complete the call and the
+    // caller's await would hang for the life of the process. Answer it here
+    // instead of presenting a modal there is no way out of.
+    if (!actions.any((a) => a.enabled)) {
+      return Future<CNAlertResult<T>?>.value(null);
+    }
 
     if (defaultTargetPlatform != TargetPlatform.iOS) {
       return _showFallback<T>(
@@ -307,7 +320,13 @@ class CNAlert {
     } on MissingPluginException {
       // The iOS side is not registered (unit tests without a mock handler, or a
       // host app on an older plugin build). Treat it as a dismissal rather than
-      // throwing into the caller's await.
+      // throwing into the caller's await -- but say so, because a silent null
+      // here is indistinguishable from the user pressing cancel.
+      debugPrint(
+        '⚠️ [cupertino_native_better] CNAlert: the cn_alert channel is not '
+        'registered. The iOS plugin build is older than this Dart API, or '
+        'this is a test without a mock handler. Returning null.',
+      );
       return null;
     }
   }

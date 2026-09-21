@@ -74,15 +74,56 @@ final class CNAlertManager: NSObject {
         // An alert already on screen means the previous caller is still
         // waiting. Take it down first, so its actions can no longer fire, then
         // answer the call it belonged to.
+        //
+        // The replacement is presented from the dismissal completion, not here:
+        // `dismiss(animated:)` does not clear `presenter.presentedViewController`
+        // in this call stack, so presenting now would be refused by UIKit
+        // ("already presenting") and dropped silently, leaving this call
+        // unanswered forever.
         if let stale = presentedAlert {
-            stale.dismiss(animated: false)
             presentedAlert = nil
+            send(nil)
+            stale.dismiss(animated: false) { [weak self] in
+                self?.present(config: config, on: presenter, result: result)
+            }
+            return
         }
-        send(nil)
 
+        // No alert on screen, but `presentedAlert` is weak: a released
+        // controller can leave `pendingResult` behind. Flush it.
+        send(nil)
+        present(config: config, on: presenter, result: result)
+    }
+
+    private func present(config: Config,
+                         on presenter: UIViewController?,
+                         result: @escaping FlutterResult) {
         guard let presenter else {
             result(FlutterError(code: "no_presenter",
                                 message: "No view controller available to present on",
+                                details: nil))
+            return
+        }
+
+        // UIKit drops a presentation onto a controller that is already showing
+        // a modal, without telling anyone. Report it instead of hanging: the
+        // Dart side collapses a `PlatformException` to a null result, so the
+        // caller still gets an answer. Its own code, because "no presenter" and
+        // "presenter busy" send a developer looking in different places.
+        guard presenter.presentedViewController == nil else {
+            result(FlutterError(code: "presenter_busy",
+                                message: "The presenting view controller is already showing a modal",
+                                details: nil))
+            return
+        }
+
+        // Mirrors the guard in `CNAlert.show`. Every way out of a `.alert` runs
+        // an action handler, so an alert with no action that accepts a tap can
+        // never be answered and would block the app. Reachable here only when
+        // the payload decodes to an empty or all-disabled action list.
+        guard config.actions.contains(where: { $0.enabled }) else {
+            result(FlutterError(code: "no_enabled_action",
+                                message: "An alert needs at least one enabled action to be answerable",
                                 details: nil))
             return
         }
@@ -103,10 +144,21 @@ final class CNAlertManager: NSObject {
             }
         }
 
+        // `UIAlertController` raises `NSInternalInconsistencyException` on a
+        // second `.cancel` action, which is an Objective-C exception from inside
+        // UIKit: neither Dart nor Swift can catch it, so the process dies. The
+        // Dart side asserts against it, but asserts are stripped from release
+        // builds and this payload is untrusted. Demote rather than drop, so a
+        // removed button cannot leave the alert without a way out.
+        var cancelUsed = false
         for (index, entry) in config.actions.enumerated() {
+            var style = entry.style
+            if style == .cancel {
+                if cancelUsed { style = .default } else { cancelUsed = true }
+            }
             let action = UIAlertAction(
                 title: entry.label,
-                style: entry.style
+                style: style
             ) { [weak self, weak alert] _ in
                 // Read the text while the controller is still alive —
                 // `alert.textFields` is nil once it deallocates.

@@ -109,11 +109,7 @@ void main() {
 
       expect(payload['textFields'], <Map<String, Object?>>[
         {'placeholder': 'Username', 'initialText': null, 'obscure': false},
-        {
-          'placeholder': 'Password',
-          'initialText': 'hunter2',
-          'obscure': true,
-        },
+        {'placeholder': 'Password', 'initialText': 'hunter2', 'obscure': true},
       ]);
     });
   });
@@ -134,6 +130,43 @@ void main() {
         // would never complete. Refused before it reaches the channel.
         expect(
           () => CNAlert.show<String>(context: context, actions: const []),
+          throwsAssertionError,
+        );
+        expect(calls, isEmpty);
+      });
+    });
+
+    testWidgets('refuses an alert whose every action is disabled', (
+      tester,
+    ) async {
+      final calls = <MethodCall>[];
+      mockChannel((call) async {
+        calls.add(call);
+        return null;
+      });
+
+      await _withPlatform(TargetPlatform.iOS, () async {
+        final context = await _pumpContext(tester);
+
+        // Same dead end as the no-actions case: every exit from a `.alert`
+        // runs an action handler, so an alert whose buttons all refuse taps
+        // blocks the app with no way to answer the call.
+        expect(
+          () => CNAlert.show<String>(
+            context: context,
+            actions: const [
+              CNAlertAction<String>(
+                label: 'Retry',
+                value: 'retry',
+                enabled: false,
+              ),
+              CNAlertAction<String>(
+                label: 'Cancel',
+                isCancel: true,
+                enabled: false,
+              ),
+            ],
+          ),
           throwsAssertionError,
         );
         expect(calls, isEmpty);
@@ -267,7 +300,9 @@ void main() {
     });
 
     testWidgets('returns null for an out-of-range index', (tester) async {
-      mockChannel((call) async => <String, Object?>{'index': 7});
+      // `index == actions.length` is the boundary: it is what separates the
+      // `>=` guard from an off-by-one `>`.
+      mockChannel((call) async => <String, Object?>{'index': 1});
 
       await _withPlatform(TargetPlatform.iOS, () async {
         final context = await _pumpContext(tester);
@@ -344,12 +379,30 @@ void main() {
         );
       });
 
+      // Asserted against the builder rather than key by key, so the
+      // `debugBuildAlertPayload` tests above transitively cover what `show`
+      // actually puts on the wire. A count would survive a dropped `style` key
+      // or a reordered action list; `Config.init` defaults every missing key,
+      // so that corruption is silent on the native side.
       expect(received?.method, 'show');
-      final args = received?.arguments as Map<Object?, Object?>?;
-      expect(args?['title'], 'Rename');
-      expect(args?['message'], 'Pick a new name.');
-      expect((args?['actions']! as List<Object?>).length, 2);
-      expect((args?['textFields']! as List<Object?>).length, 1);
+      expect(
+        received?.arguments,
+        debugBuildAlertPayload(
+          title: 'Rename',
+          message: 'Pick a new name.',
+          actions: const [
+            CNAlertAction<String>(label: 'Cancel', isCancel: true),
+            CNAlertAction<String>(
+              label: 'Save',
+              value: 'save',
+              isDefault: true,
+            ),
+          ],
+          textFields: const [
+            CNAlertTextField(placeholder: 'Name', initialText: 'Untitled'),
+          ],
+        ),
+      );
     });
   });
 
@@ -531,6 +584,30 @@ void main() {
         final result = await future;
         expect(result?.value, 'go');
         expect(result?.textFields, <String>['ada', 's3cret']);
+      });
+    });
+
+    testWidgets('fallback survives a barrier tap and resolves null on pop', (
+      tester,
+    ) async {
+      await _withPlatform(TargetPlatform.android, () async {
+        final context = await _pumpContext(tester);
+        final future = CNAlert.show<String>(
+          context: context,
+          actions: const [CNAlertAction<String>(label: 'OK', value: 'ok')],
+        );
+        await tester.pumpAndSettle();
+
+        // UIKit parity: `barrierDismissible: false`, so a tap outside the
+        // dialog does nothing.
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pumpAndSettle();
+        expect(find.byType(CupertinoAlertDialog), findsOneWidget);
+
+        // A system back press on Android reaches this path in normal use.
+        Navigator.of(context).pop();
+        await tester.pumpAndSettle();
+        expect(await future, isNull);
       });
     });
 

@@ -20,7 +20,7 @@ class AlertDemoPage extends StatefulWidget {
   /// The simulator here has no tap automation (see `lib/pr_probe_entry.dart`),
   /// so screenshot verification drives the page through this instead. One of:
   /// `twobutton`, `destructive`, `threebutton`, `titleonly`, `disabled`,
-  /// `textfield`, `secure`, `twofields`.
+  /// `textfield`, `secure`, `twofields`, `supersede`.
   final String? autoScenario;
 
   @override
@@ -54,6 +54,8 @@ class _AlertDemoPageState extends State<AlertDemoPage> {
           _showSecure();
         case 'twofields':
           _showTwoFields();
+        case 'supersede':
+          _showSupersede();
       }
     });
   }
@@ -92,11 +94,7 @@ class _AlertDemoPageState extends State<AlertDemoPage> {
         message: 'This cannot be undone.',
         actions: const [
           CNAlertAction(label: 'Cancel', value: 'cancel', isCancel: true),
-          CNAlertAction(
-            label: 'Delete',
-            value: 'delete',
-            isDestructive: true,
-          ),
+          CNAlertAction(label: 'Delete', value: 'delete', isDestructive: true),
         ],
       ),
     );
@@ -204,6 +202,34 @@ class _AlertDemoPageState extends State<AlertDemoPage> {
     );
   }
 
+  /// Fires two `CNAlert.show` calls back to back, the second while the first
+  /// alert is still animating in — the double-tap case.
+  ///
+  /// Expected: the "Second" alert is the one on screen, the first call resolves
+  /// to null, and pressing OK reports `value=second`. Before the supersede fix
+  /// this path left *no* alert on screen and the second call never resolved,
+  /// because UIKit refuses a presentation onto a controller that is still
+  /// dismissing the alert it replaces.
+  Future<void> _showSupersede() async {
+    final first = CNAlert.show<String>(
+      context: context,
+      title: 'First',
+      message: 'Superseded before it can be answered.',
+      actions: const [CNAlertAction(label: 'OK', value: 'first')],
+    );
+    final second = CNAlert.show<String>(
+      context: context,
+      title: 'Second',
+      message: 'This is the alert that must be on screen.',
+      actions: const [CNAlertAction(label: 'OK', value: 'second')],
+    );
+
+    debugPrint(
+      'CNAlert supersede: first resolved to ${(await first)?.value ?? 'null'}',
+    );
+    _record(await second);
+  }
+
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
@@ -236,10 +262,7 @@ class _AlertDemoPageState extends State<AlertDemoPage> {
                   Expanded(
                     child: Text(
                       _lastResult,
-                      style: const TextStyle(
-                        fontFamily: 'Menlo',
-                        fontSize: 13,
-                      ),
+                      style: const TextStyle(fontFamily: 'Menlo', fontSize: 13),
                     ),
                   ),
                 ],
@@ -255,6 +278,7 @@ class _AlertDemoPageState extends State<AlertDemoPage> {
             _trigger('Text field', _showTextField),
             _trigger('Secure text field', _showSecure),
             _trigger('Two text fields', _showTwoFields),
+            _trigger('Supersede (two shows at once)', _showSupersede),
 
             const SizedBox(height: 8),
             const Text(
