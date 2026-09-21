@@ -30,6 +30,7 @@
 /// - [CNGlassButtonGroup] - Grouped buttons with unified glass effects
 /// - [CNSearchBar] - Expandable search bar with animations
 /// - [CNToast] - Toast notifications with glass effects
+/// - [CNAlert] - Native alert dialog with actions and text fields
 /// - [LiquidGlassContainer] - Apply glass effects to any widget
 ///
 /// ## Platform Support
@@ -70,6 +71,7 @@ export 'components/search_bar.dart';
 export 'components/toast.dart';
 export 'components/floating_island.dart';
 export 'components/search_scaffold.dart';
+export 'components/alert.dart';
 export 'components/experimental/glass_card.dart';
 
 // Styles

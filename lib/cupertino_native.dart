@@ -45,6 +45,7 @@ export 'utils/version_detector.dart';
 export 'utils/theme_helper.dart';
 export 'style/glass_effect.dart';
 export 'utils/transition_observer.dart';
+export 'components/alert.dart';
 
 import 'cupertino_native_platform_interface.dart';
 
